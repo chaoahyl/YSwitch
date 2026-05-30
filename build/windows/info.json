@@ -1,0 +1,15 @@
+{
+  "fixed": {
+    "file_version": "1.0.0.0"
+  },
+  "info": {
+    "0000": {
+      "ProductVersion": "1.0.0.0",
+      "CompanyName": "{{.Info.CompanyName}}",
+      "FileDescription": "{{.Info.ProductName}}",
+      "LegalCopyright": "{{.Info.Copyright}}",
+      "ProductName": "{{.Info.ProductName}}",
+      "Comments": "{{.Info.Comments}}"
+    }
+  }
+}
