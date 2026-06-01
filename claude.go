@@ -185,24 +185,6 @@ func (a *App) RefreshClaudeUsage() (UsageSnapshot, error) {
 	return cachedFetchClaudeUsage(configDir)
 }
 
-// resolveUsageDir 优先返回已选 profile 的 vault 目录，
-// 使首页与账号管理页从同一来源读取凭证。
-func (a *App) resolveUsageDir(fallback string) string {
-	uiState := loadClaudeUIState()
-	if uiState.SelectedProfileID == "" {
-		return fallback
-	}
-	vaultBase, err := claudeVaultBase()
-	if err != nil {
-		return fallback
-	}
-	pd := filepath.Join(vaultBase, "profiles", uiState.SelectedProfileID)
-	if _, err := os.Stat(pd); err != nil {
-		return fallback
-	}
-	return pd
-}
-
 func (a *App) RefreshAllClaudeUsage() (AppState, error) {
 	return a.buildClaudeState()
 }

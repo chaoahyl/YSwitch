@@ -50,7 +50,9 @@ const displayAccountId = computed(
 const displayUpdatedAt = computed(
   () => displayUsage.value?.updatedAt || active.value.updatedAt || activeProfile.value?.updatedAt || "",
 );
-const displayPlan = computed(() => displayUsage.value?.planType || activeProfile.value?.plan || "");
+const displayPlan = computed(
+  () => displayUsage.value?.planType || activeProfile.value?.plan || active.value.plan || "",
+);
 
 onMounted(() => {
   void ensureStateLoaded();

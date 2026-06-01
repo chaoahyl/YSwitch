@@ -79,25 +79,9 @@ func (a *App) RefreshUsage() (UsageSnapshot, error) {
 	if err != nil {
 		return UsageSnapshot{}, err
 	}
-	return cachedFetchCodexUsage(a.resolveCodexUsageDir(codexDir))
-}
-
-// resolveCodexUsageDir 优先返回已选 profile 的 vault 目录，
-// 使首页与账号管理页从同一来源读取数据。
-func (a *App) resolveCodexUsageDir(fallback string) string {
-	uiState := loadUIState()
-	if uiState.SelectedProfileID == "" {
-		return fallback
-	}
-	vaultBase, err := codexVaultBase()
-	if err != nil {
-		return fallback
-	}
-	pd := filepath.Join(vaultBase, "profiles", uiState.SelectedProfileID)
-	if _, err := os.Stat(pd); err != nil {
-		return fallback
-	}
-	return pd
+	// 始终从实时凭证目录（~/.codex）读取：当前登录账号的令牌由 Codex 持续刷新，
+	// 而已保存 profile 中的副本是保存时的快照，令牌通常已过期，直接请求会返回 401。
+	return cachedFetchCodexUsage(codexDir)
 }
 
 func (a *App) RefreshAllUsage() (AppState, error) {
@@ -204,6 +188,19 @@ func (a *App) ActivateProfile(id string) (AppState, error) {
 	// 修改凭证前先关闭 Codex，防止其退出时将旧 token 写回。
 	launcher, stopErr := stopCodex()
 
+	// 将实时凭证写回当前正在退出的 profile vault，确保下次切回时使用最新 token
+	// （Codex 在账号使用期间会自动刷新 access token，存档快照否则会逐渐过期）。
+	if state.UIState.SelectedProfileID != "" && state.UIState.SelectedProfileID != id {
+		outDir := filepath.Join(state.VaultDir, "profiles", state.UIState.SelectedProfileID)
+		if _, statErr := os.Stat(outDir); statErr == nil {
+			for _, f := range state.Files {
+				if f.Exists {
+					_ = copyFile(f.Path, filepath.Join(outDir, f.Name))
+				}
+			}
+		}
+	}
+
 	backupDir := filepath.Join(state.VaultDir, "saved-auth")
 	activePaths := make([]string, 0, len(state.Files))
 	for _, f := range state.Files {
@@ -305,6 +302,26 @@ func (a *App) buildState() (AppState, error) {
 	profiles, err := listProfiles(profilesDir)
 	if err != nil {
 		return AppState{}, err
+	}
+
+	// 与当前实时登录账号匹配的 profile，使用实时凭证（~/.codex）的套餐与用量，
+	// 避免展示已保存快照中的过期数据：账号保存后若发生套餐升级（free→plus）或
+	// 令牌刷新，存档副本不会更新，导致账号管理页等级、额度与首页不一致。
+	for i := range profiles {
+		if !profileMatchesActive(active, profiles[i]) {
+			continue
+		}
+		if usage.Status == "ok" || len(usage.Windows) > 0 {
+			profiles[i].Usage = usage
+		} else if usage.PlanType != "" {
+			profiles[i].Usage.PlanType = usage.PlanType
+		}
+		if active.Plan != "" {
+			profiles[i].Plan = active.Plan
+		}
+		if active.Quota != "" {
+			profiles[i].Quota = active.Quota
+		}
 	}
 
 	// 清除过期的 SelectedProfileID（如用户手动删除 auth.json 后重新登录），
@@ -412,6 +429,21 @@ func fetchUsageFromAuth(codexDir string) (UsageSnapshot, error) {
 			AccountID: accountID,
 			UpdatedAt: time.Now().Format(time.RFC3339),
 		}, err
+	}
+
+	// 若 access token 的 JWT exp 已过期，跳过注定失败的网络请求，给出明确状态。
+	// 非当前账号的存档 token 无法自动续期，过期属预期情况（与 Claude 行为对称）。
+	if claims := decodeJWTClaims(token); claims != nil {
+		if exp, ok := claims["exp"].(float64); ok && time.Now().Unix() > int64(exp) {
+			msg := tr("认证已过期", "token expired")
+			return UsageSnapshot{
+				Source:    "codex",
+				Status:    msg,
+				PlanType:  planType,
+				AccountID: accountID,
+				UpdatedAt: time.Now().Format(time.RFC3339),
+			}, errors.New(msg)
+		}
 	}
 
 	endpoints := []string{
