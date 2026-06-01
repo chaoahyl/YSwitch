@@ -1,5 +1,7 @@
 # YSwitch
 
+[English](README_EN.md) | 中文
+
 **YSwitch** 是一款开源的桌面工具，用于在多个 Claude 和 Codex 账号之间快速切换。基于 [Wails](https://wails.io) 构建，Go 后端 + Vue 前端，当前仅支持 Windows。
 
 ## 截图预览
