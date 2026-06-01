@@ -39,6 +39,7 @@ func cachedFetchCodexUsage(codexDir string) (UsageSnapshot, error) {
 	snapshot, fetchErr := fetchUsageFromAuth(codexDir)
 	if fetchErr == nil {
 		codexUsageCacheMu.Lock()
+		pruneExpiredUsage(codexUsageCache)
 		codexUsageCache[token] = usageCacheEntry{snapshot: snapshot, expiresAt: time.Now().Add(usageCacheTTL)}
 		codexUsageCacheMu.Unlock()
 	}
@@ -52,7 +53,6 @@ func codexConfigDir() (string, error) {
 	}
 	return filepath.Join(home, ".codex"), nil
 }
-
 
 func codexVaultBase() (string, error) {
 	base, err := switchBaseDir()
@@ -161,7 +161,6 @@ func (a *App) ImportCurrentAccount(name string) (AppState, error) {
 	return a.buildState()
 }
 
-
 func (a *App) ActivateProfile(id string) (AppState, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -202,16 +201,7 @@ func (a *App) ActivateProfile(id string) (AppState, error) {
 	}
 
 	backupDir := filepath.Join(state.VaultDir, "saved-auth")
-	activePaths := make([]string, 0, len(state.Files))
-	for _, f := range state.Files {
-		if f.Exists {
-			activePaths = append(activePaths, f.Path)
-		}
-	}
-	if err := moveFilesAside(activePaths, backupDir); err != nil {
-		return AppState{}, fmt.Errorf("%s: %w", tr("备份旧认证文件失败", "failed to back up old auth files"), err)
-	}
-
+	replacements := make([]fileReplacement, 0, len(managedFileNames))
 	for _, fileName := range managedFileNames {
 		src := filepath.Join(profileDir, fileName)
 		if _, err := os.Stat(src); err != nil {
@@ -220,9 +210,10 @@ func (a *App) ActivateProfile(id string) (AppState, error) {
 			}
 			return AppState{}, err
 		}
-		if err := copyFile(src, filepath.Join(state.CodexDir, fileName)); err != nil {
-			return AppState{}, fmt.Errorf("%s: %w", fmt.Sprintf(tr("恢复 %s 失败", "failed to restore %s"), fileName), err)
-		}
+		replacements = append(replacements, fileReplacement{Src: src, Dst: filepath.Join(state.CodexDir, fileName)})
+	}
+	if err := replaceManagedFiles(replacements, backupDir); err != nil {
+		return AppState{}, fmt.Errorf("%s: %w", tr("切换认证文件失败", "failed to switch auth files"), err)
 	}
 
 	restartStatus := "ok"
@@ -350,7 +341,6 @@ func (a *App) buildState() (AppState, error) {
 		UIState:  uiState,
 	}, nil
 }
-
 
 func inspectFiles(codexDir string) []ManagedFile {
 	files := make([]ManagedFile, 0, len(managedFileNames))
@@ -773,20 +763,41 @@ func listProfiles(root string) ([]Profile, error) {
 		return nil, err
 	}
 
-	profiles := make([]Profile, 0, len(entries))
+	dirs := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+		if entry.IsDir() {
+			dirs = append(dirs, entry.Name())
 		}
-		dir := filepath.Join(root, entry.Name())
-		manifest, err := readProfile(dir)
-		if err != nil {
-			continue
+	}
+
+	// 并发处理每个 profile：已过期的归档 token 会被 JWT exp 检查瞬间短路（无网络），
+	// 未过期的则发起真实额度请求。并发执行避免串行 N×18s 阻塞 GetState。
+	results := make([]Profile, len(dirs))
+	ok := make([]bool, len(dirs))
+	var wg sync.WaitGroup
+	for i, name := range dirs {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			dir := filepath.Join(root, name)
+			manifest, err := readProfile(dir)
+			if err != nil {
+				return
+			}
+			summary := summarizeAccount(inspectFiles(dir))
+			enrichProfileFromSummary(&manifest.Profile, summary)
+			manifest.Profile.Usage, _ = cachedFetchCodexUsage(dir)
+			results[i] = manifest.Profile
+			ok[i] = true
+		}(i, name)
+	}
+	wg.Wait()
+
+	profiles := make([]Profile, 0, len(dirs))
+	for i := range results {
+		if ok[i] {
+			profiles = append(profiles, results[i])
 		}
-		summary := summarizeAccount(inspectFiles(dir))
-		enrichProfileFromSummary(&manifest.Profile, summary)
-		manifest.Profile.Usage, _ = cachedFetchCodexUsage(dir)
-		profiles = append(profiles, manifest.Profile)
 	}
 	sortProfilesByUpdatedAt(profiles)
 	return profiles, nil
@@ -824,7 +835,6 @@ func findDuplicateProfile(active AccountSummary, profiles []Profile) (Profile, b
 	}
 	return Profile{}, false
 }
-
 
 func (a *App) QuickImportAccount() (AppState, error) {
 	state, err := a.buildState()

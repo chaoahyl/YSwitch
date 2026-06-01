@@ -22,7 +22,6 @@ var (
 	modAdvapi32     = syscall.NewLazyDLL("advapi32.dll")
 	procCredEnum    = modAdvapi32.NewProc("CredEnumerateW")
 	procCredRead    = modAdvapi32.NewProc("CredReadW")
-	procCredDelete  = modAdvapi32.NewProc("CredDeleteW")
 	procCredWrite   = modAdvapi32.NewProc("CredWriteW")
 	procCredFreePtr = modAdvapi32.NewProc("CredFree")
 )
@@ -162,8 +161,7 @@ func windowsAnthropicDirs() []string {
 	return result
 }
 
-// updateWindowsCredentialManager updates Claude/Anthropic entries in Windows Credential Manager
-// so VSCode reads the new tokens when it restarts. Falls back to deletion (VSCode re-reads files).
+// updateWindowsCredentialManager updates known Claude Code entries only.
 func updateWindowsCredentialManager(profileDir string) {
 	data, err := os.ReadFile(filepath.Join(profileDir, ".credentials.json"))
 	if err != nil {
@@ -204,19 +202,36 @@ func updateWindowsCredentialManager(profileDir string) {
 			continue
 		}
 		target := windows.UTF16PtrToString(c.TargetName)
-		tl := strings.ToLower(target)
-		if strings.Contains(tl, "claude") || strings.Contains(tl, "anthropic") {
+		if isClaudeCodeCredentialTarget(target) {
 			matches = append(matches, credMatch{name: target, credType: c.Type})
 		}
 	}
 
 	for _, m := range matches {
-		if !patchWindowsCredential(m.name, m.credType, newAT, newRT) {
-			if tPtr, e := windows.UTF16PtrFromString(m.name); e == nil {
-				procCredDelete.Call(uintptr(unsafe.Pointer(tPtr)), uintptr(m.credType), 0)
-			}
+		_ = patchWindowsCredential(m.name, m.credType, newAT, newRT)
+	}
+}
+
+func isClaudeCodeCredentialTarget(target string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(target))
+	if normalized == "" {
+		return false
+	}
+	if normalized == "claude-code" ||
+		normalized == "anthropic.claude-code" ||
+		normalized == "vscode-anthropic.claude-code" ||
+		normalized == "vscode:anthropic.claude-code" {
+		return true
+	}
+	if !strings.Contains(normalized, "claude-code") && !strings.Contains(normalized, "anthropic.claude") {
+		return false
+	}
+	for _, marker := range []string{"oauth", "token", "credential", "account", "auth"} {
+		if strings.Contains(normalized, marker) {
+			return true
 		}
 	}
+	return strings.HasSuffix(normalized, "claude-code") || strings.HasSuffix(normalized, "anthropic.claude")
 }
 
 // patchWindowsCredential reads a credential, updates the OAuth tokens in-place, and writes it back.

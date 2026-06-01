@@ -17,7 +17,7 @@
 - **Account Saving**: Save the current logged-in account credentials to a local account library. Claude and Codex are managed independently, supporting multiple accounts each.
 - **One-Click Switching**: Select the target account and click Switch — the tool automatically replaces the local credential files and restarts the corresponding client, no manual steps required.
 - **Quota Viewing**: Refresh and display the plan type and remaining quota for each account.
-- **Fully Local**: All data is stored on your machine and never sent to any third-party server.
+- **Local Vault**: Saved account files stay on your machine. Quota refresh uses the corresponding official service API only.
 
 ---
 
@@ -30,7 +30,7 @@
 | **Claude** | Log in via the official Claude Code extension in VSCode |
 | **Codex** | Log in via the official Codex desktop client |
 
-After logging in, YSwitch only reads, backs up, and replaces the corresponding credential files locally. It never touches, reads, or uploads your passwords, tokens, or any sensitive credentials.
+After logging in, YSwitch reads, backs up, and replaces the corresponding credential files locally. When you refresh quota, it sends the access token only to the official ChatGPT or Anthropic quota endpoint; it does not upload credentials to any third-party server.
 
 ---
 

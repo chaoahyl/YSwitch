@@ -278,26 +278,13 @@ function profileUsageSummary(profile: main.Profile) {
       })
       .join("  |  ");
   }
-  const stateUsage = appState.value?.usage;
-  if (stateUsage?.windows?.length && profile.accountId && stateUsage.accountId === profile.accountId) {
-    return normalizeWindows(stateUsage.windows)
-      .map((w) => {
-        const reset = shortResetTime(w);
-        return `${usageTitle(w)} ${pct(remaining(w.usedPercent))}${reset ? ` · ${reset}` : ""}`;
-      })
-      .join("  |  ");
-  }
+  // 始终展示该 profile 自身 usage 的真实状态（如"账号已限流或认证失效""认证已过期"），
+  // 不因它不是当前账号就替换，也不借用当前账号的额度。非当前账号未用尽额度时同样能查到 windows。
   return usageStatus(profile.usage);
 }
 
 function profileUsageWindows(profile: main.Profile): string[] {
-  let windows = normalizeWindows(profile.usage?.windows ?? []);
-  if (!windows.length) {
-    const stateUsage = appState.value?.usage;
-    if (stateUsage?.windows?.length && profile.accountId && stateUsage.accountId === profile.accountId) {
-      windows = normalizeWindows(stateUsage.windows);
-    }
-  }
+  const windows = normalizeWindows(profile.usage?.windows ?? []);
   if (!windows.length) return [];
   const items = windows.map((w) => {
     const reset = shortResetTime(w);

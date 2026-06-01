@@ -41,6 +41,9 @@ const rafHandles: Record<string, number> = {};
 
 const profiles = computed(() => appState.value?.profiles ?? []);
 const active = computed<main.AccountSummary>(() => appState.value?.active ?? emptyActive);
+// 即使尚未导入，只要存在实时登录账号也展示账号卡片（卡片字段会回退到 active）。
+const hasLiveAccount = computed(() => Boolean(active.value.fingerprint || active.value.label));
+const showAccount = computed(() => hasActivated.value || hasLiveAccount.value);
 const activeProfile = computed(() => profiles.value.find((profile) => profile.id === selectedProfile.value) ?? null);
 const displayUsage = computed(() => activeUsage.value ?? appState.value?.usage ?? null);
 const displayWindows = computed(() => normalizeWindows(displayUsage.value?.windows ?? []));
@@ -48,7 +51,8 @@ const displayAccountId = computed(
   () => activeProfile.value?.accountId || active.value.accountId || displayUsage.value?.accountId || "",
 );
 const displayUpdatedAt = computed(
-  () => displayUsage.value?.updatedAt || active.value.updatedAt || activeProfile.value?.updatedAt || "",
+  // 优先展示账号/凭证的更新时刻，而非额度请求时刻（后者每次刷新都会变成"现在"）。
+  () => active.value.updatedAt || activeProfile.value?.updatedAt || displayUsage.value?.updatedAt || "",
 );
 const displayPlan = computed(
   () => displayUsage.value?.planType || activeProfile.value?.plan || active.value.plan || "",
@@ -283,7 +287,7 @@ function normalizeError(err: unknown) {
         v-else
         class="content-scroll flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-3 pb-4 pt-3 sm:gap-3 sm:px-4"
       >
-        <template v-if="!hasActivated">
+        <template v-if="!showAccount">
           <div
             class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-8 text-[var(--app-fg)] shadow-[var(--app-shadow)]"
           >

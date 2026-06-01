@@ -23,9 +23,9 @@ type usageCacheEntry struct {
 }
 
 var (
-	usageCache      = map[string]usageCacheEntry{}
-	usageCacheMu    sync.Mutex
-	usageCacheTTL   = 60 * time.Second
+	usageCache    = map[string]usageCacheEntry{}
+	usageCacheMu  sync.Mutex
+	usageCacheTTL = 60 * time.Second
 )
 
 func cachedFetchClaudeUsage(configDir string) (UsageSnapshot, error) {
@@ -46,10 +46,22 @@ func cachedFetchClaudeUsage(configDir string) (UsageSnapshot, error) {
 
 	if err == nil {
 		usageCacheMu.Lock()
+		pruneExpiredUsage(usageCache)
 		usageCache[key] = usageCacheEntry{snapshot: snapshot, expiresAt: time.Now().Add(usageCacheTTL)}
 		usageCacheMu.Unlock()
 	}
 	return snapshot, err
+}
+
+// pruneExpiredUsage 删除所有已过 TTL 的缓存条目，避免轮换掉的旧 token 条目无限累积。
+// 调用方需持有对应的互斥锁。
+func pruneExpiredUsage(m map[string]usageCacheEntry) {
+	now := time.Now()
+	for k, e := range m {
+		if now.After(e.expiresAt) {
+			delete(m, k)
+		}
+	}
 }
 
 var claudeManagedFiles = []string{
@@ -218,7 +230,8 @@ func (a *App) ActivateClaudeProfile(id string) (AppState, error) {
 
 	// 将实时凭证写回当前正在退出的 profile vault，
 	// 确保下次激活时使用最新 token（VSCode 在账号使用期间会自动刷新 access token）。
-	if state.UIState.SelectedProfileID != "" {
+	// 守卫 != id：避免把当前实时凭证写进即将激活的目标 profile 目录而污染其存档。
+	if state.UIState.SelectedProfileID != "" && state.UIState.SelectedProfileID != id {
 		outDir := filepath.Join(vaultBase, "profiles", state.UIState.SelectedProfileID)
 		if _, statErr := os.Stat(outDir); statErr == nil {
 			for _, f := range state.Files {
@@ -233,17 +246,8 @@ func (a *App) ActivateClaudeProfile(id string) (AppState, error) {
 	}
 
 	backupDir := filepath.Join(vaultBase, "saved-auth")
-	activePaths := make([]string, 0, len(state.Files))
-	for _, f := range state.Files {
-		if f.Exists {
-			activePaths = append(activePaths, f.Path)
-		}
-	}
-	if err := moveFilesAside(activePaths, backupDir); err != nil {
-		return AppState{}, fmt.Errorf("%s: %w", tr("备份旧认证文件失败", "failed to back up old auth files"), err)
-	}
-
 	writeDirs := append([]string{state.CodexDir}, windowsAnthropicDirs()...)
+	replacements := make([]fileReplacement, 0, len(writeDirs)*len(claudeManagedFiles))
 
 	for _, dir := range writeDirs {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -252,11 +256,14 @@ func (a *App) ActivateClaudeProfile(id string) (AppState, error) {
 		for _, fileName := range claudeManagedFiles {
 			src := filepath.Join(profileDir, fileName)
 			if _, statErr := os.Stat(src); statErr == nil {
-				if err := copyFile(src, filepath.Join(dir, fileName)); err != nil {
-					return AppState{}, fmt.Errorf("%s: %w", fmt.Sprintf(tr("恢复 %s 失败", "failed to restore %s"), fileName), err)
-				}
+				replacements = append(replacements, fileReplacement{Src: src, Dst: filepath.Join(dir, fileName)})
 			}
 		}
+	}
+
+	// Replace credential files only after every target copy has been prepared.
+	if err := replaceManagedFiles(replacements, backupDir); err != nil {
+		return AppState{}, fmt.Errorf("%s: %w", tr("切换认证文件失败", "failed to switch auth files"), err)
 	}
 
 	// 更新 ~/.claude.json 中的 oauthAccount，使 CLI 上下文（组织、邮箱等）与切换后的凭证一致。
@@ -280,7 +287,6 @@ func (a *App) ActivateClaudeProfile(id string) (AppState, error) {
 	next.RestartStatus = restartStatus
 	return next, nil
 }
-
 
 func (a *App) QuickImportClaudeAccount() (AppState, error) {
 	state, err := a.buildClaudeState()
@@ -336,12 +342,15 @@ func (a *App) buildClaudeState() (AppState, error) {
 	// vault 可能属于此前选中、但凭证已被手动替换的 profile。
 	usage, _ := cachedFetchClaudeUsage(configDir)
 	if !strings.Contains(active.Label, "@") {
-		if usage.Label != "" {
-			active.Label = usage.Label
-		} else if email := fetchClaudeUserLabel(configDir); email != "" {
-			active.Label = email
-		} else if oauthAccount := readActiveOAuthAccount(); oauthAccount != nil {
+		// oauthAccount 邮箱（~/.claude.json）是最可靠且无需联网的来源，优先采用。
+		if oauthAccount := readActiveOAuthAccount(); oauthAccount != nil {
 			if email := stringFromMap(oauthAccount, "emailAddress", "email", "email_address", "user_email"); email != "" {
+				active.Label = email
+			}
+		}
+		// 仍拿不到邮箱时，才回退到（不确定的）API 探测。
+		if !strings.Contains(active.Label, "@") {
+			if email := fetchClaudeUserLabel(configDir); email != "" {
 				active.Label = email
 			}
 		}
@@ -661,10 +670,10 @@ func fetchClaudeUsage(configDir string) (UsageSnapshot, error) {
 }
 
 type claudeOAuthUsageResp struct {
-	FiveHour      *claudeUsageWindow `json:"five_hour"`
-	SevenDay      *claudeUsageWindow `json:"seven_day"`
+	FiveHour       *claudeUsageWindow `json:"five_hour"`
+	SevenDay       *claudeUsageWindow `json:"seven_day"`
 	SevenDaySonnet *claudeUsageWindow `json:"seven_day_sonnet"`
-	ExtraUsage    *claudeExtraUsage  `json:"extra_usage"`
+	ExtraUsage     *claudeExtraUsage  `json:"extra_usage"`
 }
 
 type claudeUsageWindow struct {
@@ -753,19 +762,19 @@ func fetchClaudeUserLabel(configDir string) string {
 	claudeEmailCacheMu.Unlock()
 
 	// 按命中概率排序的端点列表，依据 token 的 user:profile 权限范围
-	// 以及 Anthropic 已知的 URL 规律（/api/oauth/usage 已可用）
+	// 以及 Anthropic 已知的 URL 规律（/api/oauth/usage 已可用）。
+	// 这些 URL 仅为推测，全部并发探测并设总预算，避免串行 4×6s 拖慢首屏。
 	endpoints := []string{
 		"https://api.anthropic.com/api/user/profile",
 		"https://api.anthropic.com/api/oauth/profile",
 		"https://api.anthropic.com/api/users/me",
 		"https://api.anthropic.com/api/profile",
 	}
-	client := &http.Client{Timeout: 6 * time.Second}
-	var found string
-	for _, endpoint := range endpoints {
+
+	probe := func(endpoint string, client *http.Client) string {
 		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 		if err != nil {
-			continue
+			return ""
 		}
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 		req.Header.Set("anthropic-version", "2023-06-01")
@@ -773,28 +782,49 @@ func fetchClaudeUserLabel(configDir string) string {
 		req.Header.Set("User-Agent", "claude-account-switcher")
 		resp, err := client.Do(req)
 		if err != nil {
-			continue
+			return ""
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			continue
+			return ""
 		}
 		var raw map[string]any
 		if json.Unmarshal(body, &raw) != nil {
-			continue
+			return ""
 		}
 		if email := stringFromMap(raw, "email", "emailAddress", "email_address", "user_email"); email != "" {
-			found = email
-			break
+			return email
 		}
 		for _, key := range []string{"account", "user", "profile", "oauthAccount"} {
 			if nested := mapFromMap(raw, key); nested != nil {
 				if email := stringFromMap(nested, "email", "emailAddress", "email_address"); email != "" {
-					found = email
-					break
+					return email
 				}
 			}
+		}
+		return ""
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	results := make(chan string, len(endpoints))
+	for _, endpoint := range endpoints {
+		go func(url string) {
+			results <- probe(url, client)
+		}(endpoint)
+	}
+
+	// 总预算与单请求超时一致：所有探测并发执行，最多等待约 5s。
+	deadline := time.After(6 * time.Second)
+	var found string
+	for i := 0; i < len(endpoints); i++ {
+		select {
+		case email := <-results:
+			if email != "" {
+				found = email
+			}
+		case <-deadline:
+			i = len(endpoints) // 超时即停止等待剩余探测
 		}
 		if found != "" {
 			break
@@ -841,7 +871,6 @@ func readClaudeOAuthInfo(configDir string) (accessToken, orgUUID, planType strin
 	}
 	return
 }
-
 
 func loadClaudeUIState() UIState {
 	path, err := claudeUIStatePath()
@@ -958,26 +987,44 @@ func listClaudeProfiles(root string) ([]Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-	profiles := make([]Profile, 0, len(entries))
+	dirs := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+		if entry.IsDir() {
+			dirs = append(dirs, entry.Name())
 		}
-		manifest, err := readProfile(filepath.Join(root, entry.Name()))
-		if err != nil {
-			continue
+	}
+
+	// 并发处理每个 profile：已过期的归档 token 会被 JWT exp 检查瞬间短路（无网络），
+	// 未过期的则发起真实额度请求。并发执行避免串行 N×10s 阻塞 GetClaudeState。
+	results := make([]Profile, len(dirs))
+	ok := make([]bool, len(dirs))
+	var wg sync.WaitGroup
+	for i, name := range dirs {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			profileDir := filepath.Join(root, name)
+			manifest, err := readProfile(profileDir)
+			if err != nil {
+				return
+			}
+			summary := summarizeClaudeAccount(inspectClaudeFiles(profileDir))
+			enrichProfileFromSummary(&manifest.Profile, summary)
+			manifest.Profile.Usage, _ = cachedFetchClaudeUsage(profileDir)
+			results[i] = manifest.Profile
+			ok[i] = true
+		}(i, name)
+	}
+	wg.Wait()
+
+	profiles := make([]Profile, 0, len(dirs))
+	for i := range results {
+		if ok[i] {
+			profiles = append(profiles, results[i])
 		}
-		profileDir := filepath.Join(root, entry.Name())
-		summary := summarizeClaudeAccount(inspectClaudeFiles(profileDir))
-		enrichProfileFromSummary(&manifest.Profile, summary)
-		usage, _ := cachedFetchClaudeUsage(profileDir)
-		manifest.Profile.Usage = usage
-		profiles = append(profiles, manifest.Profile)
 	}
 	sort.Slice(profiles, func(i, j int) bool {
 		return profiles[i].UpdatedAt > profiles[j].UpdatedAt
 	})
 	return profiles, nil
 }
-
-

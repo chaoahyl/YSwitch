@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -128,7 +129,6 @@ func legacyClaudeConfigDir() (string, error) {
 	}
 	return filepath.Join(home, ".claude"), nil
 }
-
 
 func extractAuthDetails(data []byte) AccountSummary {
 	details := AccountSummary{
@@ -380,6 +380,115 @@ func copyFile(src string, dst string) error {
 	return out.Sync()
 }
 
+type fileReplacement struct {
+	Src string
+	Dst string
+}
+
+type preparedReplacement struct {
+	fileReplacement
+	Temp string
+}
+
+type movedFile struct {
+	Original string
+	Backup   string
+}
+
+func replaceManagedFiles(replacements []fileReplacement, backupDir string) error {
+	if len(replacements) == 0 {
+		return errors.New(tr("未找到目标认证文件", "no target auth files found"))
+	}
+
+	prepared, err := prepareReplacementFiles(replacements)
+	if err != nil {
+		cleanupPreparedFiles(prepared)
+		return err
+	}
+
+	targets := make([]string, 0, len(prepared))
+	for _, item := range prepared {
+		targets = append(targets, item.Dst)
+	}
+
+	moved, err := moveFilesAside(targets, backupDir)
+	if err != nil {
+		cleanupPreparedFiles(prepared)
+		return err
+	}
+
+	committed := false
+	written := make([]string, 0, len(prepared))
+	defer func() {
+		if committed {
+			return
+		}
+		for _, path := range written {
+			_ = os.Remove(path)
+		}
+		cleanupPreparedFiles(prepared)
+		restoreMovedFiles(moved)
+	}()
+
+	for _, item := range prepared {
+		if err := os.Rename(item.Temp, item.Dst); err != nil {
+			return fmt.Errorf("%s: %w", fmt.Sprintf(tr("恢复 %s 失败", "failed to restore %s"), filepath.Base(item.Dst)), err)
+		}
+		written = append(written, item.Dst)
+	}
+
+	committed = true
+	if len(moved) > 0 {
+		pruneBackupSlots(backupDir, maxBackupSlots)
+	}
+	return nil
+}
+
+func prepareReplacementFiles(replacements []fileReplacement) ([]preparedReplacement, error) {
+	prepared := make([]preparedReplacement, 0, len(replacements))
+	seen := map[string]bool{}
+	for _, replacement := range replacements {
+		if strings.TrimSpace(replacement.Src) == "" || strings.TrimSpace(replacement.Dst) == "" {
+			return prepared, errors.New(tr("认证文件路径无效", "invalid auth file path"))
+		}
+		if seen[replacement.Dst] {
+			return prepared, fmt.Errorf("%s: %s", tr("重复的认证文件目标", "duplicate auth file target"), replacement.Dst)
+		}
+		seen[replacement.Dst] = true
+		if _, err := os.Stat(replacement.Src); err != nil {
+			return prepared, err
+		}
+		dstDir := filepath.Dir(replacement.Dst)
+		if err := os.MkdirAll(dstDir, 0o700); err != nil {
+			return prepared, err
+		}
+		tmp, err := os.CreateTemp(dstDir, "."+filepath.Base(replacement.Dst)+".yswitch-*")
+		if err != nil {
+			return prepared, err
+		}
+		tempPath := tmp.Name()
+		if err := tmp.Close(); err != nil {
+			_ = os.Remove(tempPath)
+			return prepared, err
+		}
+		if err := copyFile(replacement.Src, tempPath); err != nil {
+			_ = os.Remove(tempPath)
+			return prepared, err
+		}
+		prepared = append(prepared, preparedReplacement{
+			fileReplacement: replacement,
+			Temp:            tempPath,
+		})
+	}
+	return prepared, nil
+}
+
+func cleanupPreparedFiles(prepared []preparedReplacement) {
+	for _, item := range prepared {
+		_ = os.Remove(item.Temp)
+	}
+}
+
 func writeJSON(path string, value any) error {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -393,32 +502,50 @@ const maxBackupSlots = 5
 // moveFilesAside 将每个已存在的文件移入 backupDir 下的时间戳子目录，
 // 并保留最多 maxBackupSlots 个备份槽，超出时删除最旧的。
 // 优先使用 Rename；若失败（如跨设备）则先复制再删除。
-func moveFilesAside(filePaths []string, backupDir string) error {
+func moveFilesAside(filePaths []string, backupDir string) ([]movedFile, error) {
 	ts := time.Now().Format("20060102-150405.000000000")
 	slotDir := filepath.Join(backupDir, ts)
 	created := false
-	for _, src := range filePaths {
+	moved := make([]movedFile, 0, len(filePaths))
+	seen := map[string]bool{}
+	for i, src := range filePaths {
+		if seen[src] {
+			continue
+		}
+		seen[src] = true
 		if _, err := os.Stat(src); err != nil {
 			continue
 		}
 		if !created {
 			if err := os.MkdirAll(slotDir, 0o700); err != nil {
-				return err
+				return moved, err
 			}
 			created = true
 		}
-		dst := filepath.Join(slotDir, filepath.Base(src))
+		dst := filepath.Join(slotDir, fmt.Sprintf("%02d-%s", i, filepath.Base(src)))
 		if err := os.Rename(src, dst); err != nil {
 			if copyErr := copyFile(src, dst); copyErr != nil {
-				return fmt.Errorf("%s: %w", fmt.Sprintf(tr("备份 %s 失败", "failed to back up %s"), filepath.Base(src)), copyErr)
+				return moved, fmt.Errorf("%s: %w", fmt.Sprintf(tr("备份 %s 失败", "failed to back up %s"), filepath.Base(src)), copyErr)
 			}
 			_ = os.Remove(src)
 		}
+		moved = append(moved, movedFile{Original: src, Backup: dst})
 	}
-	if created {
-		pruneBackupSlots(backupDir, maxBackupSlots)
+	return moved, nil
+}
+
+func restoreMovedFiles(moved []movedFile) {
+	for i := len(moved) - 1; i >= 0; i-- {
+		item := moved[i]
+		if err := os.MkdirAll(filepath.Dir(item.Original), 0o700); err != nil {
+			continue
+		}
+		if err := os.Rename(item.Backup, item.Original); err != nil {
+			if copyErr := copyFile(item.Backup, item.Original); copyErr == nil {
+				_ = os.Remove(item.Backup)
+			}
+		}
 	}
-	return nil
 }
 
 func pruneBackupSlots(dir string, keep int) {
@@ -437,7 +564,22 @@ func pruneBackupSlots(dir string, keep int) {
 	}
 	sort.Strings(dirs)
 	for _, name := range dirs[:len(dirs)-keep] {
-		_ = os.RemoveAll(filepath.Join(dir, name))
+		slotDir := filepath.Join(dir, name)
+		files, err := os.ReadDir(slotDir)
+		if err != nil {
+			continue
+		}
+		hasNestedDir := false
+		for _, file := range files {
+			if file.IsDir() {
+				hasNestedDir = true
+				break
+			}
+			_ = os.Remove(filepath.Join(slotDir, file.Name()))
+		}
+		if !hasNestedDir {
+			_ = os.Remove(slotDir)
+		}
 	}
 }
 
