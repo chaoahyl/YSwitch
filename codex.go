@@ -104,6 +104,33 @@ func (a *App) ImportCurrentAccount(name string) (AppState, error) {
 	}
 
 	if profile, ok := findDuplicateProfile(state.Active, state.Profiles); ok {
+		// 强匹配（fingerprint 相同）：token 未变，仅更新选中状态。
+		isTokenMatch := state.Active.Fingerprint != "" && state.Active.Fingerprint == profile.Fingerprint
+		if isTokenMatch {
+			if err := a.SaveUIState(profile.ID); err != nil {
+				return AppState{}, err
+			}
+			return a.buildState()
+		}
+		// 弱匹配（accountID/label 相同但 token 已变）：同账号重新登录，刷新 vault 凭证。
+		profDir := filepath.Join(state.VaultDir, "profiles", profile.ID)
+		for _, f := range state.Files {
+			if !f.Exists {
+				continue
+			}
+			if err := copyFile(f.Path, filepath.Join(profDir, f.Name)); err != nil {
+				return AppState{}, fmt.Errorf("%s: %w", fmt.Sprintf(tr("更新凭证 %s 失败", "failed to update credential %s"), f.Name), err)
+			}
+		}
+		if mf, readErr := readProfile(profDir); readErr == nil {
+			mf.Profile.UpdatedAt = time.Now().Format(time.RFC3339)
+			mf.Profile.Fingerprint = state.Active.Fingerprint
+			mf.Profile.AccountID = state.Active.AccountID
+			if state.Active.Label != "" {
+				mf.Profile.Label = state.Active.Label
+			}
+			_ = writeJSON(filepath.Join(profDir, "profile.json"), mf)
+		}
 		if err := a.SaveUIState(profile.ID); err != nil {
 			return AppState{}, err
 		}
@@ -527,6 +554,10 @@ func requestUsage(endpoint string, token string) (UsageSnapshot, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return UsageSnapshot{}, err
+	}
+	if resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 429 {
+		msg := tr("账号已限流或认证失效", "rate limited or auth invalid")
+		return UsageSnapshot{}, errors.New(msg)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return UsageSnapshot{}, fmt.Errorf(tr("额度接口返回 %d", "quota API returned %d"), resp.StatusCode)

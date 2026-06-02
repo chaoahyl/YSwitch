@@ -278,12 +278,8 @@ function profileUsageSummary(profile: main.Profile) {
       })
       .join("  |  ");
   }
-  // 始终展示该 profile 自身 usage 的真实状态，不因它不是当前账号就替换，也不借用当前账号的额度。
-  // 真实错误状态（如"额度接口返回 429""认证已过期"）优先于存档的 quota 占位值展示。
-  if (profile.usage?.status && profile.usage.status !== "ok") {
-    return usageStatus(profile.usage);
-  }
-  if (profile.quota) return profile.quota;
+  // 真实错误状态（如"账号已限流或认证失效""认证已过期"）优先；status=ok 时也直接走
+  // usageStatus（显示"未返回可识别的额度字段"），避免展示存档的旧占位字符串。
   return usageStatus(profile.usage);
 }
 

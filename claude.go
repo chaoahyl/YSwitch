@@ -655,7 +655,7 @@ func fetchClaudeUsage(configDir string) (UsageSnapshot, error) {
 	defer resp.Body.Close()
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode == 429 {
+	if resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 429 {
 		msg := tr("账号已限流或认证失效", "rate limited or auth invalid")
 		base.Status = msg
 		return base, errors.New(msg)

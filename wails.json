@@ -9,5 +9,12 @@
   "author": {
     "name": "chaoahyl",
     "email": "245424417@qq.com"
+  },
+  "info": {
+    "companyName": "chaoahyl",
+    "productName": "YSwitch",
+    "productVersion": "1.0.0.3",
+    "copyright": "Copyright © 2026 chaoahyl",
+    "comments": "Local AI account configuration manager"
   }
 }
