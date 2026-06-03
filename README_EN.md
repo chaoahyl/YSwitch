@@ -16,8 +16,30 @@
 
 - **Account Saving**: Save the current logged-in account credentials to a local account library. Claude and Codex are managed independently, supporting multiple accounts each.
 - **One-Click Switching**: Select the target account and click Switch — the tool automatically replaces the local credential files and restarts the corresponding client, no manual steps required.
-- **Quota Viewing**: Refresh and display the plan type and remaining quota for each account.
+- **Quota Viewing**: View the plan type and remaining quota for each account (based on locally saved credentials; if a token has expired, switch to that account first before refreshing — see note below).
 - **Local Vault**: Saved account files stay on your machine. Quota refresh uses the corresponding official service API only.
+
+---
+
+## About Quota Viewing
+
+YSwitch is **not an official multi-account parallel query tool** — it is fundamentally a local credential switcher:
+
+- After logging in, clicking **Save Current Account** backs up the current `~/.claude/.credentials.json` to the local account library.
+- **Switch** replaces the active credential file with the selected account's backup and restarts VSCode/Codex so it runs under the new account.
+- **Refresh Quota** reads the saved credentials for each account and calls the official API to fetch quota.
+
+**Why can both accounts be queried today, but only the active one tomorrow?**
+
+| Reason | Explanation |
+|--------|-------------|
+| Short-lived access tokens | Claude Code credentials contain short-lived tokens. Only the currently active account has its token automatically refreshed by Claude Code; backed-up credentials are never renewed in the background. |
+| Backups are static snapshots | Credentials are fresh when saved. By the next day, the token for the non-active account may have expired, and YSwitch cannot obtain a new token on its behalf. |
+| Quota refresh uses saved credentials | Refreshing quota does not switch accounts — it uses the token from the time of saving. Once that token expires, the query will fail. |
+
+**Recommended Usage**
+
+To get the latest quota for a specific account, **switch to that account first**, wait for VSCode/Codex to reload under the new account, and then click **Refresh Quota**. Do not expect both accounts to continuously show up-to-date quota without switching.
 
 ---
 
