@@ -43,8 +43,8 @@ const profiles = computed(() => appState.value?.profiles ?? []);
 const active = computed<main.AccountSummary>(() => appState.value?.active ?? emptyActive);
 // 即使尚未导入，只要存在实时登录账号也展示账号卡片（卡片字段会回退到 active）。
 const hasLiveAccount = computed(() => Boolean(active.value.fingerprint || active.value.label));
-const showAccount = computed(() => hasActivated.value || hasLiveAccount.value);
 const activeProfile = computed(() => profiles.value.find((profile) => profile.id === selectedProfile.value) ?? null);
+const showAccount = computed(() => hasActivated.value || hasLiveAccount.value);
 const displayUsage = computed(() => activeUsage.value ?? appState.value?.usage ?? null);
 const displayWindows = computed(() => normalizeWindows(displayUsage.value?.windows ?? []));
 const displayAccountId = computed(
@@ -57,6 +57,11 @@ const displayUpdatedAt = computed(
 const displayPlan = computed(
   () => displayUsage.value?.planType || activeProfile.value?.plan || active.value.plan || "",
 );
+const displayName = computed(
+  () => activeProfile.value?.label || activeProfile.value?.name || active.value.label || t('common.noAccountDetected'),
+);
+const displayAuthMode = computed(() => activeProfile.value?.authMode || active.value.authMode || t('common.unknown'));
+const displayFingerprint = computed(() => activeProfile.value?.fingerprint || active.value.fingerprint || "");
 
 onMounted(() => {
   void ensureStateLoaded();
@@ -147,8 +152,11 @@ function normalizeWindows(windows: RateLimitWindow[]) {
 
 function usageTitle(window: RateLimitWindow) {
   const name = window.limitName;
-  if (name && /[一-鿿\d]/.test(name)) return name;
-  return formatDuration(window.windowDurationMins) || window.limitId || t('codex.home.usageFallback');
+  const duration = formatDuration(window.windowDurationMins);
+  if (name && /[一-鿿\d]/.test(name)) {
+    return duration ? `${duration}-${name}` : name;
+  }
+  return duration || window.limitId || t('codex.home.usageFallback');
 }
 
 function formatDuration(minutes: number) {
@@ -288,9 +296,7 @@ function normalizeError(err: unknown) {
         class="content-scroll flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-3 pb-4 pt-3 sm:gap-3 sm:px-4"
       >
         <template v-if="!showAccount">
-          <div
-            class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-8 text-[var(--app-fg)] shadow-[var(--app-shadow)]"
-          >
+          <div class="glass-card p-8 text-[var(--app-fg)]">
             <div
               class="flex flex-col items-center justify-center gap-1.5 py-10 text-center [&_p]:text-sm [&_p]:font-semibold [&_span]:text-xs [&_span]:text-[var(--app-muted)]"
               style="padding-top: 0.5rem; padding-bottom: 0.5rem"
@@ -298,7 +304,7 @@ function normalizeError(err: unknown) {
               <p>{{ t('codex.home.noAccount') }}</p>
               <span>{{ t('codex.home.noAccountHint') }}</span>
               <button
-                class="mt-5 inline-flex h-10 items-center justify-center rounded-xl border border-transparent bg-[var(--app-fg)] px-6 text-sm font-semibold text-[var(--app-bg)] outline-none transition-[opacity,background,color] duration-150 hover:opacity-80"
+                class="primary-button mt-5 h-10 px-6 text-sm font-semibold"
                 @click="router.push({ name: 'codex-account' })"
               >
                 {{ t('codex.home.goToManage') }}
@@ -308,19 +314,17 @@ function normalizeError(err: unknown) {
         </template>
 
         <template v-else>
-          <div
-            class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-[var(--app-shadow)]"
-          >
+          <div class="glass-card p-5">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">{{ t('common.currentAccount') }}</p>
                 <p class="mt-1.5 break-all text-xl font-semibold leading-snug">
-                  {{ activeProfile?.label || activeProfile?.name || active.label || t('common.noAccountDetected') }}
+                  {{ displayName }}
                 </p>
               </div>
               <span
                 v-if="displayPlan"
-                class="shrink-0 rounded-full border border-transparent bg-[var(--app-fg)] px-3 py-1 text-xs font-bold tracking-wider text-[var(--app-bg)]"
+                class="shrink-0 rounded-full bg-[var(--app-fg)] px-3 py-1 text-xs font-bold tracking-wider text-[var(--app-bg)]"
               >
                 {{ t('common.planLevel', { plan: displayPlan }) }}
               </span>
@@ -329,13 +333,13 @@ function normalizeError(err: unknown) {
               <div class="flex flex-col gap-1">
                 <span class="text-xs text-[var(--app-muted)]">{{ t('common.authMode') }}</span>
                 <span class="font-mono text-sm font-semibold">{{
-                  activeProfile?.authMode || active.authMode || t('common.unknown')
+                  displayAuthMode
                 }}</span>
               </div>
               <div class="flex flex-col gap-1">
                 <span class="text-xs text-[var(--app-muted)]">{{ t('common.fingerprint') }}</span>
                 <span class="font-mono text-sm font-semibold">{{
-                  shortValue(activeProfile?.fingerprint || active.fingerprint || "")
+                  shortValue(displayFingerprint)
                 }}</span>
               </div>
               <div class="flex flex-col gap-1">
@@ -349,13 +353,11 @@ function normalizeError(err: unknown) {
             </div>
           </div>
 
-          <section
-            class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 text-[var(--app-fg)] shadow-[var(--app-shadow)] sm:p-5"
-          >
+          <section class="glass-card p-4 text-[var(--app-fg)] sm:p-5">
             <div class="mb-4 flex min-w-0 items-center justify-between gap-3 [&_h2]:text-base [&_h2]:font-semibold">
               <h2>{{ t('codex.home.usageSection') }}</h2>
               <button
-                class="inline-flex h-7 min-w-14 items-center justify-center gap-1.5 rounded-xl border border-transparent bg-[var(--app-fg)] px-3 text-xs font-semibold text-[var(--app-bg)] outline-none transition-[opacity,background,color] duration-150 hover:opacity-80"
+                class="primary-button h-8 min-w-16 px-3 text-xs font-semibold"
                 :disabled="usageBusy"
                 @click="refreshUsage"
               >
@@ -375,17 +377,12 @@ function normalizeError(err: unknown) {
                 v-for="(window, index) in displayWindows"
                 :key="`${window.limitName}-${window.windowDurationMins}`"
                 :style="{ '--i': index }"
-                class="rounded-xl border border-[var(--app-border)] bg-[var(--app-inner)] p-4 transition-colors duration-150"
+                class="soft-card p-4 transition-colors duration-150"
               >
                 <div
                   class="flex items-start justify-between gap-2 [&_h3]:text-xs [&_h3]:font-medium [&_h3]:uppercase [&_h3]:tracking-wide [&_h3]:text-[var(--app-muted)]"
                 >
-                  <h3>
-                    {{ usageTitle(window) }}
-                    <template v-if="!window.limitName && formatDuration(window.windowDurationMins)">
-                      · {{ formatDuration(window.windowDurationMins) }}
-                    </template>
-                  </h3>
+                  <h3>{{ usageTitle(window) }}</h3>
                   <span
                     class="text-3xl font-bold leading-none tabular-nums"
                     :style="{ color: fillColor(animVal(window)) }"
@@ -421,18 +418,17 @@ function normalizeError(err: unknown) {
           </section>
         </template>
 
-        <button
-          class="flex w-full items-center justify-between rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 text-left shadow-[var(--app-shadow)] outline-none transition-colors duration-150 hover:bg-[var(--app-hover)] sm:p-5"
-          @click="router.push({ name: 'codex-account' })"
-        >
-          <div>
-            <p class="m-0 text-base font-semibold">{{ t('codex.home.manageBtn') }}</p>
-            <p class="m-0 mt-0.5 text-xs text-[var(--app-muted)]">
-              {{ profiles.length ? t('codex.home.savedCount', { n: profiles.length }) : t('codex.home.addOrSwitch') }}
-            </p>
-          </div>
-          <span class="h-4 w-4 shrink-0 text-[var(--app-muted)] icon-[mdi--arrow-right]"></span>
-        </button>
+        <div class="grid gap-3">
+          <button class="glass-card flex items-center justify-between p-4 text-left outline-none sm:p-5" @click="router.push({ name: 'codex-account' })">
+            <div>
+              <p class="m-0 text-base font-semibold">{{ t('codex.home.manageBtn') }}</p>
+              <p class="m-0 mt-0.5 text-xs text-[var(--app-muted)]">
+                {{ profiles.length ? t('codex.home.savedCount', { n: profiles.length }) : t('codex.home.addOrSwitch') }}
+              </p>
+            </div>
+            <span class="h-4 w-4 shrink-0 text-[var(--app-muted)] icon-[mdi--arrow-right]"></span>
+          </button>
+        </div>
       </div>
 
       <ToastMessage :message="message" :error="error" />

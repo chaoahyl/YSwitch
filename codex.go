@@ -18,10 +18,25 @@ var managedFileNames = []string{
 	"auth.json",
 }
 
+type usageCacheEntry struct {
+	snapshot  UsageSnapshot
+	expiresAt time.Time
+}
+
 var (
 	codexUsageCache   = map[string]usageCacheEntry{}
 	codexUsageCacheMu sync.Mutex
+	usageCacheTTL     = 60 * time.Second
 )
+
+func pruneExpiredUsage(m map[string]usageCacheEntry) {
+	now := time.Now()
+	for key, entry := range m {
+		if now.After(entry.expiresAt) {
+			delete(m, key)
+		}
+	}
+}
 
 func cachedFetchCodexUsage(codexDir string) (UsageSnapshot, error) {
 	token, _, _, err := readAccessToken(codexDir)
@@ -321,6 +336,9 @@ func (a *App) buildState() (AppState, error) {
 	if err != nil {
 		return AppState{}, err
 	}
+	if profiles == nil {
+		profiles = []Profile{}
+	}
 
 	// 与当前实时登录账号匹配的 profile，使用实时凭证（~/.codex）的套餐与用量，
 	// 避免展示已保存快照中的过期数据：账号保存后若发生套餐升级（free→plus）或
@@ -449,7 +467,7 @@ func fetchUsageFromAuth(codexDir string) (UsageSnapshot, error) {
 	}
 
 	// 若 access token 的 JWT exp 已过期，跳过注定失败的网络请求，给出明确状态。
-	// 非当前账号的存档 token 无法自动续期，过期属预期情况（与 Claude 行为对称）。
+	// 非当前账号的存档 token 无法自动续期，过期属预期情况。
 	if claims := decodeJWTClaims(token); claims != nil {
 		if exp, ok := claims["exp"].(float64); ok && time.Now().Unix() > int64(exp) {
 			msg := tr("认证已过期", "token expired")

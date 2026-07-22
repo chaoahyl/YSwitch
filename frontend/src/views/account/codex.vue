@@ -227,8 +227,11 @@ function formatDuration(minutes: number) {
 
 function usageTitle(window: RateLimitWindow) {
   const name = window.limitName;
-  if (name && /[一-鿿\d]/.test(name)) return name;
-  return formatDuration(window.windowDurationMins) || window.limitId || t("codex.home.usageFallback");
+  const duration = formatDuration(window.windowDurationMins);
+  if (name && /[一-鿿\d]/.test(name)) {
+    return duration ? `${duration}-${name}` : name;
+  }
+  return duration || window.limitId || t("codex.home.usageFallback");
 }
 
 function remaining(usedPercent: number) {
@@ -311,7 +314,7 @@ function normalizeError(err: unknown) {
 
 <template>
   <main
-    class="app-shell relative flex h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-fg)]"
+    class="app-shell account-page relative flex h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-fg)]"
     :data-theme="theme.darkMode ? 'dark' : 'light'"
   >
     <div class="pointer-events-none absolute inset-0"></div>
@@ -387,7 +390,7 @@ function normalizeError(err: unknown) {
         <div class="flex items-center justify-between gap-3">
           <div class="flex items-center gap-3">
             <button
-              class="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[var(--app-border)] bg-transparent text-[var(--app-fg)] outline-none transition-colors duration-150 hover:bg-[var(--app-hover)]"
+              class="soft-button h-8 w-8"
               :disabled="busy || usageBusy"
               @click="router.push({ name: 'codex' })"
             >
@@ -397,13 +400,11 @@ function normalizeError(err: unknown) {
           </div>
         </div>
 
-        <section
-          class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 text-[var(--app-fg)] shadow-[var(--app-shadow)] sm:p-5"
-        >
+        <section class="glass-card p-4 text-[var(--app-fg)] sm:p-5">
           <div class="mb-4 flex min-w-0 items-center justify-between gap-3 [&_h2]:text-base [&_h2]:font-semibold">
             <h2>{{ t("codex.account.currentSection") }}</h2>
             <button
-              class="no-drag inline-flex h-7 items-center justify-center gap-1 rounded-xl border border-[var(--app-border)] bg-transparent px-2.5 text-xs font-medium text-[var(--app-fg)] outline-none transition-[background,color,opacity] duration-150 hover:bg-[var(--app-hover)]"
+              class="no-drag soft-button h-8 px-3 text-xs font-medium"
               :disabled="detectBusy || busy"
               @click="detectCurrent"
             >
@@ -419,8 +420,8 @@ function normalizeError(err: unknown) {
           <p class="mb-3 text-xs leading-relaxed text-[var(--app-muted)]">{{ t("codex.account.fileHint") }}</p>
 
           <div
-            class="mb-3 rounded-xl border bg-[var(--app-inner)] p-3 transition-colors duration-200"
-            :class="activeMissing ? 'border-[var(--red)] bg-[rgb(255_59_48_/_0.05)]' : 'border-[var(--app-border)]'"
+            class="soft-card mb-3 p-3 transition-colors duration-200"
+            :class="activeMissing ? '!bg-[rgb(255_59_48_/_0.08)]' : ''"
           >
             <p class="m-0 text-sm font-semibold">{{ active.label || t("codex.account.noAccount") }}</p>
             <p class="mt-2 text-xs leading-relaxed text-[var(--app-muted)]">{{ t("codex.account.authFileLine") }}</p>
@@ -428,7 +429,7 @@ function normalizeError(err: unknown) {
 
           <div class="flex justify-start">
             <button
-              class="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-transparent bg-[var(--app-fg)] px-6 text-sm font-semibold text-[var(--app-bg)] outline-none transition-[opacity,background,color] duration-150 hover:opacity-80 disabled:opacity-40"
+              class="primary-button h-10 px-6 text-sm font-semibold disabled:opacity-40"
               :disabled="busy || activeMissing"
               @click="quickImport"
             >
@@ -444,9 +445,7 @@ function normalizeError(err: unknown) {
           </div>
         </section>
 
-        <section
-          class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 text-[var(--app-fg)] shadow-[var(--app-shadow)] sm:p-5"
-        >
+        <section class="glass-card p-4 text-[var(--app-fg)] sm:p-5">
           <div class="mb-4 flex min-w-0 items-center justify-between gap-3 [&_h2]:text-base [&_h2]:font-semibold">
             <h2>{{ t("codex.account.stepsTitle") }}</h2>
           </div>
@@ -464,7 +463,7 @@ function normalizeError(err: unknown) {
                 class="absolute bottom-[-14px] left-[15px] top-[38px] w-px bg-[var(--app-border)]"
               ></span>
               <div
-                class="min-w-0 flex-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-inner)] px-4 py-3 text-sm leading-relaxed text-[var(--app-fg)]"
+                class="soft-card min-w-0 flex-1 px-4 py-3 text-sm leading-relaxed text-[var(--app-fg)]"
               >
                 {{ step }}
               </div>
@@ -472,14 +471,12 @@ function normalizeError(err: unknown) {
           </ol>
         </section>
 
-        <section
-          class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 text-[var(--app-fg)] shadow-[var(--app-shadow)] sm:p-5"
-        >
+        <section class="glass-card p-4 text-[var(--app-fg)] sm:p-5">
           <div class="mb-4 flex min-w-0 items-center justify-between gap-3 [&_h2]:text-base [&_h2]:font-semibold">
             <h2>{{ t("codex.account.savedSection") }}</h2>
             <div class="flex items-center gap-2">
               <button
-                class="no-drag inline-flex h-7 items-center justify-center gap-1 rounded-xl border border-[var(--app-border)] bg-transparent px-2.5 text-xs font-medium text-[var(--app-fg)] outline-none transition-[background,color,opacity] duration-150 hover:bg-[var(--app-hover)]"
+                class="no-drag primary-button h-8 px-3 text-xs font-medium"
                 :disabled="busy || usageBusy"
                 @click="refreshAllProfiles"
               >
@@ -491,7 +488,7 @@ function normalizeError(err: unknown) {
                 <span>{{ usageBusy ? t("common.refreshing") : t("codex.account.refreshUsage") }}</span>
               </button>
               <span
-                class="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-xs font-medium text-[var(--app-muted)]"
+                class="rounded-full bg-[var(--app-inner)] px-2 py-0.5 text-xs font-medium text-[var(--app-muted)]"
                 >{{ t("codex.account.countSuffix", { n: profiles.length }) }}</span
               >
             </div>
@@ -509,7 +506,7 @@ function normalizeError(err: unknown) {
             <article
               v-for="profile in profiles"
               :key="profile.id"
-              class="cursor-pointer rounded-xl border px-3 py-2 transition-colors duration-150"
+              class="soft-card cursor-pointer px-3 py-2 transition-colors duration-150"
               :class="
                 selectedProfile === profile.id
                   ? 'border-[var(--app-fg)] bg-[var(--accent-soft)]'
@@ -528,11 +525,11 @@ function normalizeError(err: unknown) {
                 </div>
                 <div class="flex shrink-0 items-center gap-2">
                   <span
-                    class="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-xs font-medium text-[var(--app-fg)]"
+                    class="rounded-full bg-[var(--app-panel)] px-2 py-0.5 text-xs font-medium text-[var(--app-fg)]"
                     >{{ profilePlanLabel(profile) }}</span
                   >
                   <button
-                    class="inline-flex h-7 min-w-14 items-center justify-center rounded-xl border border-transparent bg-[var(--app-fg)] px-3 text-xs font-semibold text-[var(--app-bg)] outline-none transition-[opacity,background,color] duration-150 hover:opacity-80"
+                    class="primary-button h-7 min-w-12 px-2.5 text-xs font-semibold"
                     :disabled="busy || usageBusy"
                     @click.stop="confirmActivate(profile)"
                   >
@@ -560,7 +557,7 @@ function normalizeError(err: unknown) {
           @click.self="confirmProfile = null"
         >
           <div
-            class="w-[min(300px,calc(100vw-2rem))] rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-6 shadow-[var(--app-shadow)]"
+            class="glass-card w-[min(300px,calc(100vw-2rem))] p-6"
           >
             <p class="mb-1 text-sm font-semibold">{{ t("codex.account.confirmSwitchTitle") }}</p>
             <p class="mb-5 text-xs leading-relaxed text-[var(--app-muted)]">
@@ -568,13 +565,13 @@ function normalizeError(err: unknown) {
             </p>
             <div class="flex justify-end gap-2 [&_button]:h-[38px] [&_button]:w-[92px] [&_button]:px-0">
               <button
-                class="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--app-border)] bg-transparent px-6 text-sm font-medium text-[var(--app-fg)] outline-none transition-[background,color,opacity] duration-150 hover:bg-[var(--app-hover)]"
+                class="soft-button h-10 px-6 text-sm font-medium"
                 @click="confirmProfile = null"
               >
                 {{ t("common.cancel") }}
               </button>
               <button
-                class="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-transparent bg-[var(--app-fg)] px-6 text-sm font-semibold text-[var(--app-bg)] outline-none transition-[opacity,background,color] duration-150 hover:opacity-80"
+                class="primary-button h-10 px-6 text-sm font-semibold"
                 :disabled="busy"
                 @click="doActivate"
               >
@@ -619,4 +616,5 @@ function normalizeError(err: unknown) {
   opacity: 0;
   transform: translateY(10px);
 }
+
 </style>

@@ -114,22 +114,6 @@ func switchBaseDir() (string, error) {
 	return filepath.Join(home, ".yswitch"), nil
 }
 
-func claudeConfigBaseDir() (string, error) {
-	base, err := switchBaseDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, "claude"), nil
-}
-
-func legacyClaudeConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".claude"), nil
-}
-
 func extractAuthDetails(data []byte) AccountSummary {
 	details := AccountSummary{
 		Label:             "",
