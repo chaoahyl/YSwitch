@@ -15,9 +15,9 @@
 ## Features
 
 - **Account Saving**: Save the current logged-in Codex account credentials to a local account library, supporting multiple accounts.
-- **One-Click Switching**: Select the target account and click Switch — the tool automatically replaces the local credential files and restarts the corresponding client, no manual steps required.
+- **One-Click Switching**: Select the target account and click Switch — the tool automatically replaces the local credential file and restarts Codex, no manual steps required.
 - **Quota Viewing**: View the plan type and remaining quota for each account (based on locally saved credentials; if a token has expired, switch to that account first before refreshing — see note below).
-- **Local Vault**: Saved account files stay on your machine. Quota refresh uses the corresponding official service API only.
+- **Local Vault**: Saved account files stay on your machine. Quota refresh uses only the official ChatGPT quota endpoint.
 
 ---
 
@@ -45,11 +45,7 @@ To get the latest quota for a specific account, **switch to that account first**
 
 ## Login Method
 
-**This tool does not implement any login logic. All logins are completed through the official clients.**
-
-| Account Type | Login Method |
-|-------------|-------------|
-| **Codex** | Log in via the official Codex desktop client |
+**This tool does not implement any login logic. All logins are completed through the official Codex desktop client.**
 
 After logging in, YSwitch reads, backs up, and replaces Codex credential files locally. When you refresh quota, it sends the access token only to the official ChatGPT quota endpoint; it does not upload credentials to any third-party server.
 
@@ -78,8 +74,6 @@ wails build
 ---
 
 ## Usage
-
-### Codex Accounts
 
 1. Log in to account A via the official Codex desktop client, then open YSwitch.
 2. Click **Save Current Account** to store account A in the library.
